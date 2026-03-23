@@ -1,0 +1,7 @@
+## Interface: 11200
+## Title: VendorBulkBuy
+## Notes: Lets you enter vendor buy amounts above the default limit.
+## Author: You
+## Version: 1.0
+
+VendorBulkBuy.lua
