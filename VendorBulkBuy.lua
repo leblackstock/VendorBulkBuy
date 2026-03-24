@@ -5,7 +5,6 @@ local MAX_PURCHASES_PER_CALL = 255
 local BUY_INTERVAL = 0.05
 local AMOUNT_POPUP = "VENDOR_BULK_BUY_AMOUNT"
 local CONFIRM_POPUP = "VENDOR_BULK_BUY_CONFIRM"
-local DIAGNOSTIC = true
 
 local frame = CreateFrame("Frame")
 local originalOpenStackSplitFrame = nil
@@ -19,12 +18,6 @@ local pendingTypedAmount = nil
 local function Print(message)
     if DEFAULT_CHAT_FRAME then
         DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99" .. ADDON_NAME .. ":|r " .. message)
-    end
-end
-
-local function Debug(message)
-    if DIAGNOSTIC then
-        Print("diag: " .. message)
     end
 end
 
@@ -124,7 +117,6 @@ local function ProcessPurchaseQueue()
         return
     end
 
-    Debug("ProcessPurchaseQueue chunk=" .. tostring(chunk) .. ", itemIndex=" .. tostring(purchaseQueue.merchantIndex))
     BuyMerchantItem(purchaseQueue.merchantIndex, chunk)
     purchaseQueue.remainingPurchases = purchaseQueue.remainingPurchases - chunk
 
@@ -137,8 +129,6 @@ local function StartMerchantPurchase(requestedPieces, context)
     local requestedPurchases
     local actualPurchases
     local actualPieces
-
-    Debug("StartMerchantPurchase requested=" .. tostring(requestedPieces) .. ", item=" .. tostring(context and context.itemName))
 
     if not context then
         return
@@ -176,8 +166,6 @@ local function StartMerchantPurchase(requestedPieces, context)
 end
 
 local function PromptForPurchase(requestedPieces, context)
-    Debug("PromptForPurchase requested=" .. tostring(requestedPieces) .. ", item=" .. tostring(context and context.itemName))
-
     if not requestedPieces or requestedPieces < 1 or not context then
         return
     end
@@ -222,15 +210,12 @@ StaticPopupDialogs[AMOUNT_POPUP] = {
             editBox:SetNumeric(true)
         end
 
-        Debug("AMOUNT_POPUP show hasEditBox=" .. tostring(editBox ~= nil))
     end,
     OnAccept = function()
         local popup = this
         local editBox = GetAmountPopupEditBox(popup)
         local requestedPieces = (editBox and tonumber(editBox:GetText())) or pendingTypedAmount or 0
         local context = (popup and popup.data) or pendingMerchantContext
-
-        Debug("AMOUNT_POPUP accept requested=" .. tostring(requestedPieces) .. ", pendingTyped=" .. tostring(pendingTypedAmount) .. ", hasContext=" .. tostring(context ~= nil) .. ", item=" .. tostring(context and context.itemName))
 
         pendingMerchantContext = nil
         pendingTypedAmount = nil
@@ -257,7 +242,6 @@ StaticPopupDialogs[AMOUNT_POPUP] = {
         elseif this:GetText() == "" then
             pendingTypedAmount = nil
         end
-        Debug("AMOUNT_POPUP text changed value=" .. tostring(pendingTypedAmount))
     end,
 }
 
@@ -270,7 +254,6 @@ StaticPopupDialogs[CONFIRM_POPUP] = {
     hideOnEscape = 1,
     preferredIndex = 3,
     OnAccept = function()
-        Debug("CONFIRM_POPUP accept requested=" .. tostring(pendingLargePurchase and pendingLargePurchase.requestedPieces) .. ", item=" .. tostring(pendingLargePurchase and pendingLargePurchase.context and pendingLargePurchase.context.itemName))
         if pendingLargePurchase and pendingLargePurchase.context then
             StartMerchantPurchase(pendingLargePurchase.requestedPieces, pendingLargePurchase.context)
         end

@@ -1,28 +1,29 @@
 # VendorBulkBuy
 
-VendorBulkBuy is a small Turtle WoW addon that lets you use the normal Shift-click vendor quantity box for amounts above the default limit.
+VendorBulkBuy is a small Turtle WoW addon that lets you Shift-click a vendor item, type the amount you want, and buy more than the default limit.
 
 ## Release Version
 
-- Version: 1.0
+- Version: 1.1
 - Status: Release version
 - Compatible with: Turtle WoW 1.18.1
 
 ## What It Does
 
-- expands the normal vendor Shift-click quantity prompt beyond 20
-- supports very large purchases
-- adds an extra confirmation for purchases above 255
-- keeps vendor buying behavior minimal by using the normal buy-tab quantity workflow
+- opens a custom amount popup when you Shift-click a vendor item
+- supports very large purchases by splitting the buy into multiple vendor calls
+- asks for confirmation before purchases above 20
+- works with vendor pack sizes automatically
 
 ## How To Use
 
 1. Open a vendor on the buy tab.
 2. Shift-click the item you want to buy.
-3. Enter the amount you want.
-4. If the amount is above 255, confirm the purchase in the extra prompt.
+3. Enter the amount you want in the popup.
+4. If the amount is above 20, confirm the purchase in the second prompt.
 
 ## Notes
 
-- For items sold in bundles, the addon buys based on the vendor's pack size.
-- Very large purchases may be completed in multiple internal buy calls.
+- Items sold in bundles are handled using the vendor's pack size.
+- Very large purchases are completed in multiple internal buy calls.
+- This release uses the custom popup flow instead of relying on the default stack-split box.
