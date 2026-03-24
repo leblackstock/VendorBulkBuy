@@ -1,10 +1,10 @@
 local ADDON_NAME = "VendorBulkBuy"
 local DEFAULT_MAX_PIECES = 9999
-local LARGE_PURCHASE_THRESHOLD = 255
+local LARGE_PURCHASE_THRESHOLD = 20
 local MAX_PURCHASES_PER_CALL = 255
 local BUY_INTERVAL = 0.05
 local CONFIRM_POPUP = "VENDOR_BULK_BUY_CONFIRM"
-local DIAGNOSTIC = false
+local DIAGNOSTIC = true
 
 local frame = CreateFrame("Frame")
 local originalOpenStackSplitFrame = nil
@@ -13,12 +13,16 @@ local originalStackSplitTextOnEnterPressed = nil
 local originalStackSplitInputBoxOnEnterPressed = nil
 local originalStackSplitEditBoxOnEnterPressed = nil
 local originalStackSplitOkayFunction = nil
+local originalStackSplitOkayOnMouseUp = nil
+local originalStackSplitFrameOnHide = nil
+local originalStackSplitCancelOnClick = nil
 
 local splitContext = nil
 local pendingLargePurchase = nil
 local purchaseQueue = nil
 local timeUntilNextBuy = 0
 local typedSplitAmount = nil
+local stackSplitCancelled = nil
 
 local function Print(message)
     if DEFAULT_CHAT_FRAME then
@@ -42,6 +46,7 @@ local function ResetMerchantState()
     purchaseQueue = nil
     timeUntilNextBuy = 0
     typedSplitAmount = nil
+    stackSplitCancelled = nil
 end
 
 local function GetMerchantIndexFromFrame(frameObject)
@@ -99,6 +104,73 @@ local function DescribeField(fieldName)
         .. ",hookscript=" .. tostring(type(field.HookScript) == "function")
 end
 
+local function DumpStackSplitObject(stage, objectKind, index, object)
+    local objectType
+    local description
+    local text
+    local value
+    local minValue
+    local maxValue
+
+    if not object or type(object.GetObjectType) ~= "function" then
+        return
+    end
+
+    objectType = object:GetObjectType()
+    if objectType ~= "EditBox" and objectType ~= "Slider" and objectType ~= "Button" and objectType ~= "FontString" then
+        return
+    end
+
+    description = stage .. " " .. objectKind .. index .. " type=" .. tostring(objectType)
+
+    if type(object.GetName) == "function" then
+        description = description .. ", name=" .. tostring(object:GetName())
+    end
+
+    if type(object.GetText) == "function" then
+        text = object:GetText()
+        description = description .. ", text=" .. tostring(text)
+    end
+
+    if type(object.GetValue) == "function" then
+        value = object:GetValue()
+        description = description .. ", value=" .. tostring(value)
+    end
+
+    if type(object.GetMinMaxValues) == "function" then
+        minValue, maxValue = object:GetMinMaxValues()
+        description = description .. ", min=" .. tostring(minValue) .. ", max=" .. tostring(maxValue)
+    end
+
+    Debug(description)
+end
+
+local function DumpStackSplitFrame(stage)
+    local children
+    local regions
+    local i
+
+    if not StackSplitFrame then
+        Debug(stage .. " frame=nil")
+        return
+    end
+
+    Debug(stage .. " frameName=" .. tostring(StackSplitFrame.GetName and StackSplitFrame:GetName() or nil) .. ", split=" .. tostring(StackSplitFrame.split))
+
+    children = { StackSplitFrame:GetChildren() }
+    regions = { StackSplitFrame:GetRegions() }
+
+    Debug(stage .. " children=" .. table.getn(children) .. ", regions=" .. table.getn(regions))
+
+    for i = 1, table.getn(children) do
+        DumpStackSplitObject(stage, "child", i, children[i])
+    end
+
+    for i = 1, table.getn(regions) do
+        DumpStackSplitObject(stage, "region", i, regions[i])
+    end
+end
+
 local function GetExpandedMerchantMax(maxStack, parent)
     local merchantIndex
     local context
@@ -150,7 +222,9 @@ local function HookStackSplitFrame()
             )
         end
 
-        return originalOpenStackSplitFrame(expandedMax, parent, anchor, anchorTo)
+        originalOpenStackSplitFrame(expandedMax, parent, anchor, anchorTo)
+        DumpStackSplitFrame("open")
+        return
     end
 end
 
@@ -195,6 +269,10 @@ local function UpdateTypedSplitAmountFromField(field)
             return value
         end
     end
+end
+
+local function ClearTypedDigits()
+    typedSplitAmount = nil
 end
 
 local function CloseMerchantStackSplit()
@@ -267,6 +345,41 @@ local function StartLargeMerchantPurchase(requestedPieces, context)
     ProcessPurchaseQueue()
 end
 
+local function QueueRemainingMerchantPurchase(totalRequestedPieces, context)
+    local requestedPurchases
+    local firstPassPurchases
+    local remainingPurchases
+    local remainingPieces
+
+    if not context then
+        return false
+    end
+
+    requestedPurchases = math.ceil(totalRequestedPieces / context.quantityPerPurchase)
+    firstPassPurchases = math.min(requestedPurchases, MAX_PURCHASES_PER_CALL)
+    remainingPurchases = requestedPurchases - firstPassPurchases
+
+    if remainingPurchases < 1 then
+        return false
+    end
+
+    remainingPieces = remainingPurchases * context.quantityPerPurchase
+
+    pendingLargePurchase = {
+        requestedPieces = remainingPieces,
+        context = {
+            merchantIndex = context.merchantIndex,
+            itemName = context.itemName,
+            quantityPerPurchase = context.quantityPerPurchase,
+            numAvailable = context.numAvailable,
+        },
+    }
+
+    StaticPopupDialogs[CONFIRM_POPUP].text = "Buy remaining " .. remainingPieces .. " " .. (context.itemName or "items") .. "?"
+    StaticPopup_Show(CONFIRM_POPUP)
+    return true
+end
+
 local function TryHandleLargePurchase()
     local requestedPieces
 
@@ -275,6 +388,8 @@ local function TryHandleLargePurchase()
     end
 
     requestedPieces = GetStackSplitValue()
+    Debug("TryHandleLargePurchase requested=" .. tostring(requestedPieces) .. ", typed=" .. tostring(typedSplitAmount))
+    DumpStackSplitFrame("accept")
 
     if requestedPieces and requestedPieces > LARGE_PURCHASE_THRESHOLD then
         pendingLargePurchase = {
@@ -331,11 +446,39 @@ local function HookStackSplitOkayButton()
     Debug("HookStackSplitOkayButton attached")
 
     StackSplitOkayButton:SetScript("OnClick", function()
+        Debug("StackSplitOkayButton OnClick fired")
         if TryHandleLargePurchase() then
             return
         end
 
         return originalStackSplitOkayOnClick()
+    end)
+
+    if type(StackSplitOkayButton.GetScript) == "function" then
+        originalStackSplitOkayOnMouseUp = StackSplitOkayButton:GetScript("OnMouseUp")
+        if originalStackSplitOkayOnMouseUp then
+            StackSplitOkayButton:SetScript("OnMouseUp", function()
+                Debug("StackSplitOkayButton OnMouseUp fired")
+                return originalStackSplitOkayOnMouseUp()
+            end)
+        end
+    end
+end
+
+local function HookStackSplitCancelButton()
+    if originalStackSplitCancelOnClick or not StackSplitCancelButton then
+        return
+    end
+
+    originalStackSplitCancelOnClick = StackSplitCancelButton:GetScript("OnClick")
+    if not originalStackSplitCancelOnClick then
+        return
+    end
+
+    StackSplitCancelButton:SetScript("OnClick", function()
+        stackSplitCancelled = true
+        Debug("StackSplitCancelButton OnClick fired")
+        return originalStackSplitCancelOnClick()
     end)
 end
 
@@ -398,6 +541,7 @@ local function HookStackSplitOkayFunction()
     originalStackSplitOkayFunction = StackSplitOkayButton_OnClick
     Debug("HookStackSplitOkayFunction attached")
     StackSplitOkayButton_OnClick = function()
+        Debug("StackSplitOkayButton_OnClick global fired")
         if TryHandleLargePurchase() then
             return
         end
@@ -406,23 +550,61 @@ local function HookStackSplitOkayFunction()
     end
 end
 
+local function HookStackSplitHideDiagnostic()
+    if not StackSplitFrame or originalStackSplitFrameOnHide then
+        return
+    end
+
+    originalStackSplitFrameOnHide = StackSplitFrame:GetScript("OnHide")
+    StackSplitFrame:SetScript("OnHide", function()
+        local requestedPieces = tonumber(StackSplitFrame and StackSplitFrame.split)
+
+        Debug(
+            "StackSplitFrame OnHide fired: typed=" .. tostring(typedSplitAmount)
+            .. ", split=" .. tostring(StackSplitFrame and StackSplitFrame.split)
+            .. ", text=" .. tostring(StackSplitText and StackSplitText.GetText and StackSplitText:GetText() or nil)
+            .. ", cancelled=" .. tostring(stackSplitCancelled)
+        )
+
+        if not stackSplitCancelled and splitContext and requestedPieces and requestedPieces > LARGE_PURCHASE_THRESHOLD then
+            QueueRemainingMerchantPurchase(requestedPieces, splitContext)
+        end
+
+        stackSplitCancelled = nil
+        typedSplitAmount = nil
+
+        if originalStackSplitFrameOnHide then
+            return originalStackSplitFrameOnHide()
+        end
+    end)
+end
+
 frame:SetScript("OnEvent", function()
     if event == "PLAYER_LOGIN" then
         HookStackSplitFrame()
         HookStackSplitOkayButton()
+        HookStackSplitCancelButton()
         HookStackSplitEnterHandlers()
         HookStackSplitOkayFunction()
+        HookStackSplitHideDiagnostic()
         Print("loaded. Use the normal vendor Shift-click quantity box for amounts over 20.")
     elseif event == "MERCHANT_SHOW" then
+        stackSplitCancelled = nil
         HookStackSplitOkayButton()
+        HookStackSplitCancelButton()
         HookStackSplitEnterHandlers()
         HookStackSplitOkayFunction()
+        HookStackSplitHideDiagnostic()
     elseif event == "MERCHANT_CLOSED" then
         ResetMerchantState()
     end
 end)
 
 frame:SetScript("OnUpdate", function()
+    if StackSplitFrame and StackSplitFrame:IsVisible() and DIAGNOSTIC then
+        -- intentionally quiet while visible; accept/hide paths log explicitly
+    end
+
     if not purchaseQueue then
         return
     end
